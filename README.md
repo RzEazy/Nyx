@@ -3,7 +3,7 @@
 
 Create a virtual environment and activating a virtual environment using: 
 ```bash
-python3.12 -m venv <name>
+python3.12 -m venv venv
 source bin/activate (In Linux)
 .\Script\activate (In Windows)
 ```
