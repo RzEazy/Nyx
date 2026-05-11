@@ -1,7 +1,7 @@
 from core import nyxen
 import time
 nyxen = nyxen(
-    api_key="jADyfv6mP1ieilwk9swmx9cYvYx67OscByreAm3x",
+    api_key="API_KEY",
     memory_file="Nyxen_memory.json"
 )
 
