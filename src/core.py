@@ -3,7 +3,7 @@ import json
 import subprocess
 
 class nyxen:
-    def __init__(self, api_key, memory_file="Nyxen_memory.json"):
+    def __init__(self, api_key, memory_file="Nyx_memory.json"):
         self.co = cohere.Client(api_key)
         self.memory_file = memory_file
         self.load_memory()
@@ -58,8 +58,11 @@ class nyxen:
         for conv in self.memory["conversations"][-10:]:
             history += f"User: {conv['user']}\nNyxen: {conv['Nyxen']}\n"
 
-        # Clean, Gen-Z, no cringe tone
+        # Clean, Gen-Z, no cringe tone, concise
         return (
+            f"You are Nyx, a direct and concise AI assistant. "
+            f"Keep your answers brief and to the point. If the user ask for a detailed answer like how do I code a program or ask for some reference for code, you do not have to strictly keep it short. "
+            f"Answer short questions with short answers. If the user ask for a detailed answer like how do I code a program or ask for some reference for code, you do not have to strictly keep it short. \n\n"
             f"{history}"
             f"User: {user_input}\nNyxen:"
         )

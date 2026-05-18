@@ -1,0 +1,71 @@
+Metadata-Version: 2.4
+Name: run
+Version: 0.3
+Summary: Python process run control
+Home-page: https://github.com/tehmaze/run
+Author: Wijnand Modderman
+Author-email: Wijnand Modderman-Lenstra <maze@pyth0n.org>
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/tehmaze/run
+Project-URL: Issues, https://github.com/tehmaze/run/issues
+Classifier: Programming Language :: Python :: 3
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.0
+License-File: LICENSE
+Dynamic: author
+Dynamic: home-page
+Dynamic: license-file
+
+============
+ python-run
+============
+
+This module provides convenient ways to guarantee a certain script
+state. 
+
+``run.alone``
+=============
+
+Make sure only one instance of the program is running,
+this is done by acquiring an fcntl file lock on the
+current script:
+
+    >>> import run.alone
+
+Caveats
+-------
+
+There are a few things to keep in mind:
+
+1. import run.alone once, it will exit your program if it gets
+   imported twice
+
+2. symlinked scripts will be resolved to the inode it has been
+   linked to, this is a limitiation of using fcltn file locks
+
+``run.until``
+=============
+
+Run until a specified timespec, if the process runs
+longer, it will be killed:
+
+    >>> import run
+    >>> run.until('23m42s')
+    >>> ...
+
+You can also choose to limit on the amount of CPU-time
+being consumed (default is wall clock time):
+
+    >>> run.until('42s', 'cpu')
+    >>> ...
+
+Acknowledgements
+================
+
+This module is dirived from the `Sys::RunAlone`_ and 
+`Sys::RunUntil`_ perl modules written by `Elizabeth Mattijsen`_.
+
+.. _Sys::RunAlone: http://search.cpan.org/~elizabeth/Sys-RunAlone/
+.. _Sys::RunUntil: http://search.cpan.org/~elizabeth/Sys-RunUntil/
+.. _Elizabeth Mattijsen: http://search.cpan.org/~elizabeth/
+

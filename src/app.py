@@ -1,7 +1,9 @@
+# DEPRECATED SCRIPT
+# Only For Debugging - RZY
 from core import nyxen
 import time
 nyxen = nyxen(
-    api_key="API_KEY",
+    api_key="jADyfv6mP1ieilwk9swmx9cYvYx67OscByreAm3x",
     memory_file="Nyxen_memory.json"
 )
 
