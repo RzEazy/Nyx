@@ -1,0 +1,154 @@
+Screen {
+    background: #1a1b26;
+}
+
+#header-bar {
+    dock: top;
+    height: 3;
+    background: #24283b;
+    color: #7aa2f7;
+    content-align: center middle;
+    text-style: bold;
+}
+
+#chat-view {
+    height: 1fr;
+    border: solid #3b4261;
+    margin: 0 1;
+    background: #1a1b26;
+}
+
+.bubble-user {
+    width: 85%;
+    margin: 1 0 1 2;
+    padding: 1 2;
+    background: #24283b;
+    color: cyan;
+    border-left: thick cyan;
+}
+
+.bubble-agent {
+    width: 85%;
+    margin: 1 2 1 0;
+    padding: 1 2;
+    background: #1f2335;
+    color: white;
+    border-left: thick #bb9af7;
+}
+
+.bubble-tool {
+    width: 90%;
+    margin: 0 1 1 1;
+    padding: 1 2;
+    color: #e0af68;
+    text-style: dim;
+    background: #16161e;
+}
+
+.bubble-welcome {
+    width: 95%;
+    margin: 1;
+    padding: 1 2;
+    background: #16161e;
+    border: solid #3b4261;
+    color: #a9b1d6;
+}
+
+Footer {
+    background: #16161e;
+    color: #565f89;
+}
+
+#status-bar {
+    dock: bottom;
+    height: 1;
+    background: #24283b;
+    color: #565f89;
+    padding: 0 2;
+}
+
+#input-row {
+    dock: bottom;
+    height: 3;
+    margin: 0 1 1 1;
+}
+
+#chat-input {
+    width: 1fr;
+    margin-right: 1;
+    background: #1a1b26;
+    border: solid #bb9af7;
+    color: #c0caf5;
+}
+
+#send-btn {
+    min-width: 10;
+    background: #7aa2f7;
+    color: #1a1b26;
+}
+
+SettingsModal {
+    align: center middle;
+}
+
+#settings-dialog {
+    width: 60;
+    height: auto;
+    max-height: 80%;
+    border: solid #7aa2f7;
+    background: #1f2335;
+    padding: 1 2;
+}
+
+#settings-dialog Label {
+    margin-top: 1;
+}
+
+#settings-dialog Select {
+    margin-bottom: 1;
+}
+
+#settings-dialog Input {
+    margin-bottom: 1;
+}
+
+.settings-buttons {
+    layout: horizontal;
+    height: 3;
+    margin-top: 1;
+}
+
+.settings-buttons Button {
+    margin-right: 1;
+}
+
+SudoPasswordModal {
+    align: center middle;
+}
+
+#sudo-dialog {
+    width: 70;
+    height: auto;
+    border: solid #e0af68;
+    background: #1f2335;
+    padding: 1 2;
+}
+
+#sudo-dialog Label {
+    margin: 1 0;
+}
+
+#sudo-cmd-preview {
+    color: #a9b1d6;
+    text-style: italic;
+    margin-bottom: 1;
+}
+
+#sudo-password-input {
+    margin-bottom: 1;
+    border: solid #e0af68;
+}
+
+#sudo-remember {
+    margin-bottom: 1;
+}
