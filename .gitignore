@@ -1,0 +1,15 @@
+.env
+.env.local
+data/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+*.db
+Nyx_memory.json
+Nyxen_memory.json
+src/prompt.txt
