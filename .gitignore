@@ -1,0 +1,34 @@
+# Environment
+.env
+.env.local
+
+# Virtual env
+.venv/
+venv/
+pyvenv.cfg
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Data / runtime
+data/
+*.db
+Nyx_memory.json
+Nyxen_memory.json
+
+# Personal system data
+system_app_paths.txt
+
+# Dev / scratch files
+_speed_test.py
+src/
+tests/automate.py
