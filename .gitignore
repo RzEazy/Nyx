@@ -9,7 +9,6 @@ venv/
 .pytest_cache/
 .coverage
 htmlcov/
-*.db
+# Memory / conversation data (never commit)
 Nyx_memory.json
-Nyxen_memory.json
 src/prompt.txt
