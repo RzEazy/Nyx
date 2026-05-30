@@ -196,7 +196,7 @@ def normalize_tool_args(tool: str, args: dict) -> dict:
             if key in out and "code" not in out:
                 out["code"] = out.pop(key)
     elif tool == "edit_file":
-        for key in ("path", "file", "file_path"):
+        for key in ("path", "file", "file_path", "name", "save_as", "output"):
             if key in out and "filepath" not in out:
                 out["filepath"] = out.pop(key)
         for key in ("old_string", "old_text", "find", "search"):
@@ -205,9 +205,6 @@ def normalize_tool_args(tool: str, args: dict) -> dict:
         for key in ("new_string", "new_text", "replace", "replacement"):
             if key in out and "new" not in out:
                 out["new"] = out.pop(key)
-        for key in ("file", "name", "save_as", "output"):
-            if key in out and "filename" not in out:
-                out["filename"] = out.pop(key)
         for key in ("editor", "program", "application"):
             if key in out and "app" not in out:
                 out["app"] = out.pop(key)
@@ -1010,12 +1007,115 @@ async def open_app_gui(app: str = "") -> str:
         return _FAILSAFE_HELP
 
 
+def _focus_vscode_hypr():
+    """Focus VSCode window on Hyprland via hyprctl."""
+    import json
+    import subprocess as _sp
+    try:
+        result = _sp.run(["hyprctl", "-j", "clients"], capture_output=True, text=True, timeout=5)
+        if result.returncode != 0:
+            return False
+        clients = json.loads(result.stdout)
+        for c in clients:
+            cls = c.get("class", "").lower()
+            title = c.get("title", "").lower()
+            if "code" in cls or "vscode" in title or "visual studio code" in title:
+                ws = c["workspace"]["id"]
+                _sp.run(["hyprctl", "dispatch", "workspace", str(ws)], timeout=3)
+                _sp.run(["hyprctl", "dispatch", "focuswindow", f"class:{c['class']}"], timeout=3)
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _is_vscode_running() -> bool:
+    """Check if VSCode process is already running (cross-platform)."""
+    for p in psutil.process_iter(["name"]):
+        try:
+            pn = p.info.get("name", "").lower()
+            if any(x in pn for x in ("code", "vscode")):
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return False
+
+
+def _active_window_is_vscode() -> bool:
+    """Check if the foreground window is VSCode."""
+    try:
+        import pygetwindow as _gw
+        active = _gw.getActiveWindow()
+        if active:
+            t = active.title.lower()
+            if any(x in t for x in ("visual studio code", "code -", "code.", "vscode")):
+                return True
+    except Exception:
+        pass
+    try:
+        import win32gui
+        t = win32gui.GetWindowText(win32gui.GetForegroundWindow()).lower()
+        if any(x in t for x in ("visual studio code", "code -", "code.", "vscode")):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _focus_vscode_win():
+    """Focus existing VSCode window on Windows. Tries multiple methods, verifies."""
+    import win32con, win32gui, win32process
+
+    # Collect all VSCode window handles first
+    targets = []
+
+    def _enum(hwnd, _results):
+        if not win32gui.IsWindowVisible(hwnd):
+            return
+        title = win32gui.GetWindowText(hwnd)
+        t = title.lower()
+        if any(x in t for x in ("visual studio code", "code -", "code.", "vscode")):
+            _results.append(hwnd)
+
+    win32gui.EnumWindows(_enum, targets)
+
+    if not targets:
+        # Fallback: pywinauto by PID
+        try:
+            from pywinauto import Application as _App
+            for p in psutil.process_iter(["name", "pid"]):
+                pn = p.info.get("name", "").lower()
+                if any(x in pn for x in ("code", "vscode")):
+                    _app = _App(backend="uia").connect(process=p.info["pid"])
+                    _app.top_window().set_focus()
+                    return _active_window_is_vscode()
+        except Exception:
+            pass
+        return False
+
+    # Force foreground via AttachThreadInput (bypasses UIPI)
+    import ctypes
+    cur_tid = ctypes.windll.kernel32.GetCurrentThreadId()
+    for hwnd in targets:
+        try:
+            tid = win32process.GetWindowThreadProcessId(hwnd)[0]
+            win32process.AttachThreadInput(cur_tid, tid, True)
+            win32gui.SetForegroundWindow(hwnd)
+            win32process.AttachThreadInput(cur_tid, tid, False)
+            if _active_window_is_vscode():
+                return True
+        except Exception:
+            continue
+
+    return False
+
+
 async def write_code(code: str = "", filename: str = "", app: str = "vscode") -> str:
     """Open editor, type code character-by-character (typewriter effect), then save.
 
-    Opens the editor via Windows search, creates a new untitled file, types
-    the code visibly character-by-character using pyautogui.typewrite(), then
-    saves with the given filename.
+    Auto-detects OS. If VSCode is already open, focuses it (Alt+Tab on Windows,
+    hyprctl on Hyprland) instead of launching a new window. Then creates a new
+    file via Ctrl+N and types the code visibly character-by-character.
 
     Args:
         code: the full code/content to type (e.g. a complete Python script)
@@ -1027,15 +1127,51 @@ async def write_code(code: str = "", filename: str = "", app: str = "vscode") ->
     if not filename:
         filename = "script.py"
 
+    existing_path = Path(filename).resolve()
+    if existing_path.exists() and existing_path.stat().st_size > 50:
+        return (
+            f"write_code: '{filename}' already exists ({existing_path.stat().st_size} bytes). "
+            f"If this is a bug fix, DO NOT rewrite the whole file. Use read_file('{filename}') "
+            f"to check the content, then edit_file(filepath='{filename}', old=..., new=...) "
+            f"to make targeted fixes. Only use write_code again if you want a COMPLETE rewrite "
+            f"(delete the file first with a run_command)."
+        )
+
     lines = code.split("\n")
+
+    lines = code.split("\n")
+    is_linux = sys.platform.startswith("linux")
 
     try:
         if app in ("vscode", "code"):
-            pyautogui.hotkey("win")
-            await asyncio.sleep(0.4)
-            pyautogui.typewrite("vscode", interval=0.04)
-            await asyncio.sleep(1.5)
-            pyautogui.press("enter")
+            code_running = _is_vscode_running()
+
+            if code_running:
+                if is_linux:
+                    _focus_vscode_hypr()
+                else:
+                    _focus_vscode_win()
+                    await asyncio.sleep(0.5)
+                    if not _active_window_is_vscode():
+                        _focus_vscode_win()
+                        await asyncio.sleep(0.5)
+            else:
+                import subprocess as _sp
+                if is_linux:
+                    try:
+                        _sp.Popen(["code"], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                    except FileNotFoundError:
+                        pyautogui.hotkey("win", "enter")
+                        await asyncio.sleep(0.5)
+                        pyautogui.typewrite("code", interval=0.04)
+                        await asyncio.sleep(0.3)
+                        pyautogui.press("enter")
+                else:
+                    pyautogui.hotkey("win")
+                    await asyncio.sleep(0.4)
+                    pyautogui.typewrite("vscode", interval=0.04)
+                    await asyncio.sleep(1.5)
+                    pyautogui.press("enter")
             await asyncio.sleep(3.0)
 
             pyautogui.hotkey("ctrl", "n")
@@ -1051,6 +1187,8 @@ async def write_code(code: str = "", filename: str = "", app: str = "vscode") ->
             pyautogui.press("enter")
 
         elif app in ("notepad",):
+            if is_linux:
+                return "write_code: notepad not available on Linux"
             pyautogui.hotkey("win")
             await asyncio.sleep(0.4)
             pyautogui.typewrite("notepad", interval=0.04)
