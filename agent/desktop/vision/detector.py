@@ -133,7 +133,7 @@ class UIDetector:
             edges = cv2.Canny(gray, 50, 150)
             contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             for cnt in contours:
-                x, y, cw, ch = cv2.BoundingRect(cnt) if hasattr(cv2, 'BoundingRect') else cv2.boundingRect(cnt)
+                x, y, cw, ch = cv2.boundingRect(cnt)
                 if ch > 30 and cw > 200 and y > h * 0.6:
                     cx = x + cw // 2
                     cy = y + ch // 2

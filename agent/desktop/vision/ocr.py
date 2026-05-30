@@ -1,6 +1,6 @@
-"""OCR text detection using EasyOCR with confidence scoring."""
+"""OCR text detection — Tesseract (fast) with EasyOCR fallback."""
 
-import io
+from pathlib import Path
 from typing import Optional
 
 from ..config import DesktopConfig
@@ -8,6 +8,23 @@ from ..utils import get_logger
 
 log = get_logger("vision.ocr")
 
+# ── Tesseract (fast, ~200ms) ──────────────────────────────────────
+HAS_TESSERACT = False
+try:
+    import pytesseract as _pyt
+    for _p in [
+        Path(Path.home() / "AppData" / "Local" / "Programs" / "Tesseract-OCR" / "tesseract.exe"),
+        Path("C:\\Program Files\\Tesseract-OCR\\tesseract.exe"),
+        Path("C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe"),
+    ]:
+        if _p.exists():
+            _pyt.pytesseract.tesseract_cmd = str(_p)
+            HAS_TESSERACT = True
+            break
+except Exception:
+    pass
+
+# ── EasyOCR fallback (~5-8s) ─────────────────────────────────────
 HAS_EASYOCR = False
 try:
     import easyocr
@@ -21,19 +38,51 @@ class OCR:
         self.cfg = cfg
         self._reader = None
 
-    def _get(self):
+    def _get_easyocr(self):
         if self._reader is None and HAS_EASYOCR:
             self._reader = easyocr.Reader(self.cfg.ocr_languages, gpu=False, verbose=False)
         return self._reader
 
+    def _tesseract_detect(self, image) -> list[dict]:
+        import numpy as np
+        arr = np.array(image.convert("L"))  # grayscale
+        import pytesseract
+        data = pytesseract.image_to_data(arr, output_type=pytesseract.Output.DICT)
+        out = []
+        n = len(data["text"])
+        for i in range(n):
+            text = data["text"][i].strip()
+            conf = int(data["conf"][i]) / 100.0
+            if not text or conf < self.cfg.ocr_confidence:
+                continue
+            x, y, w, h = data["left"][i], data["top"][i], data["width"][i], data["height"][i]
+            if w < 2 or h < 2:
+                continue
+            out.append({
+                "text": text,
+                "bbox": [x, y, x + w, y + h],
+                "center": [x + w // 2, y + h // 2],
+                "confidence": round(conf, 3),
+            })
+        return out
+
     def detect(self, image) -> list[dict]:
-        """Run OCR on a PIL Image. Returns list of {text, bbox, center, confidence}."""
+        """Run OCR on a PIL Image. Returns list of {text, bbox, center, confidence}.
+
+        Uses Tesseract (~200ms) when available, falls back to EasyOCR (~5-8s).
+        """
+        if HAS_TESSERACT:
+            result = self._tesseract_detect(image)
+            if result:
+                return result
+
         if not HAS_EASYOCR:
             return []
-        reader = self._get()
+        reader = self._get_easyocr()
         if reader is None:
             return []
 
+        import io
         buf = io.BytesIO()
         image.save(buf, format="PNG")
         buf.seek(0)

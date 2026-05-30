@@ -1,5 +1,6 @@
 import asyncio
 import glob as glob_module
+import os
 import shlex
 import shutil
 import sys
@@ -190,6 +191,30 @@ def normalize_tool_args(tool: str, args: dict) -> dict:
         for key in ("url", "link", "address"):
             if key in out and "url" not in out:
                 out["url"] = out.pop(key)
+    elif tool == "write_code":
+        for key in ("content", "text", "source"):
+            if key in out and "code" not in out:
+                out["code"] = out.pop(key)
+    elif tool == "edit_file":
+        for key in ("path", "file", "file_path"):
+            if key in out and "filepath" not in out:
+                out["filepath"] = out.pop(key)
+        for key in ("old_string", "old_text", "find", "search"):
+            if key in out and "old" not in out:
+                out["old"] = out.pop(key)
+        for key in ("new_string", "new_text", "replace", "replacement"):
+            if key in out and "new" not in out:
+                out["new"] = out.pop(key)
+        for key in ("file", "name", "save_as", "output"):
+            if key in out and "filename" not in out:
+                out["filename"] = out.pop(key)
+        for key in ("editor", "program", "application"):
+            if key in out and "app" not in out:
+                out["app"] = out.pop(key)
+    elif tool == "search_on_page":
+        for key in ("q", "search", "text"):
+            if key in out and "query" not in out:
+                out["query"] = out.pop(key)
     elif tool == "open_app_gui":
         for key in ("app", "name", "program", "application"):
             if key in out and "app" not in out:
@@ -465,6 +490,31 @@ async def write_file(
         return f"write_file failed: {e}"
 
 
+async def edit_file(filepath: str = "", old: str = "", new: str = "") -> str:
+    """Find and replace text in a file. Perfect for fixing bugs without rewriting the whole file.
+
+    Args:
+        filepath: path to the file to edit
+        old: the exact text to find (must match exactly)
+        new: the replacement text
+    """
+    if not filepath or not old:
+        return "edit_file: provide filepath and old text to find"
+    try:
+        p = Path(filepath).resolve()
+        if not p.exists():
+            return f"edit_file: {filepath} not found"
+        text = p.read_text(encoding="utf-8")
+        if old not in text:
+            return f"edit_file: could not find:\n---\n{old}\n---\nin {filepath}"
+        count = text.count(old)
+        text = text.replace(old, new, 1)
+        p.write_text(text, encoding="utf-8")
+        return f"Replaced 1 occurrence in {filepath}"
+    except Exception as e:
+        return f"edit_file error: {e}"
+
+
 async def system_info() -> str:
     try:
         cpu = psutil.cpu_percent(interval=0.1)
@@ -502,13 +552,49 @@ import threading
 
 _SNAP_CACHE = {"img": None, "elements": [], "time": 0, "lock": threading.Lock()}
 
+# ── Tesseract (fast, ~200ms) ──────────────────────────────────────
+_HAS_TESSERACT = False
+try:
+    import pytesseract as _pyt
+    # 1. Check TESSERACT_PATH env var
+    _tess_env = os.environ.get("TESSERACT_PATH", "")
+    if _tess_env:
+        _p = Path(_tess_env)
+        if _p.exists():
+            _pyt.pytesseract.tesseract_cmd = str(_p)
+            _HAS_TESSERACT = True
+    # 2. Check common install locations
+    if not _HAS_TESSERACT:
+        for _p in [
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Tesseract-OCR" / "tesseract.exe",
+            Path(os.environ.get("PROGRAMFILES", "C:\\Program Files")) / "Tesseract-OCR" / "tesseract.exe",
+            Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)")) / "Tesseract-OCR" / "tesseract.exe",
+        ]:
+            if _p.exists():
+                _pyt.pytesseract.tesseract_cmd = str(_p)
+                _HAS_TESSERACT = True
+                break
+    # 3. Fallback: check if pytesseract can find it in PATH
+    if not _HAS_TESSERACT:
+        import subprocess
+        try:
+            subprocess.run([_pyt.pytesseract.tesseract_cmd, "--version"],
+                           capture_output=True, timeout=5)
+            _HAS_TESSERACT = True
+        except Exception:
+            pass
+except Exception:
+    pass
+
+# ── EasyOCR fallback (lazy init, ~5-8s first use) ───────────────
 _EASY_READER = None
+_EASY_AVAILABLE = False
 try:
     import easyocr as _easy
-    # Pre-init reader ONCE at module load so it's warm when tools are called
-    _EASY_READER = _easy.Reader(["en"], gpu=False, verbose=False)
+    _EASY_AVAILABLE = True
+    _easy_imported = _easy  # keep reference for lazy init
 except Exception:
-    _EASY_READER = None
+    pass
 
 
 def _downscale(image, max_dim: int = 1280):
@@ -521,12 +607,52 @@ def _downscale(image, max_dim: int = 1280):
     return image.resize((nw, nh), 1), scale, scale  # 1 = LANCZOS
 
 
+def _tesseract_ocr(image) -> list[dict]:
+    """OCR using Tesseract. Fast (~200-500ms) vs EasyOCR (~5-8s)."""
+    if not _HAS_TESSERACT:
+        return []
+    import numpy as np
+    arr = np.array(image.convert("L"))  # grayscale for speed
+    try:
+        data = _pyt.image_to_data(arr, output_type=_pyt.Output.DICT)
+    except Exception:
+        return []
+    out = []
+    n = len(data["text"])
+    for i in range(n):
+        text = data["text"][i].strip()
+        conf = int(data["conf"][i]) / 100.0
+        if not text or conf < 0.3:
+            continue
+        x, y, w, h = data["left"][i], data["top"][i], data["width"][i], data["height"][i]
+        if w < 2 or h < 2:
+            continue
+        out.append({
+            "text": text,
+            "bbox": [x, y, x + w, y + h],
+            "center": [x + w // 2, y + h // 2],
+            "confidence": round(conf, 2),
+        })
+    return out
+
+
 def _fast_ocr(image) -> list[dict]:
-    """OCR using EasyOCR singleton with image downscaling for speed."""
+    """OCR: Tesseract primary (~200ms), EasyOCR fallback (~5-8s)."""
+    if _HAS_TESSERACT:
+        result = _tesseract_ocr(image)
+        if result:
+            return result
+    global _EASY_READER
+    if _EASY_READER is None and _EASY_AVAILABLE:
+        # Lazy init — only pay the 5-8s cost if Tesseract actually fails
+        try:
+            _EASY_READER = _easy.Reader(["en"], gpu=False, verbose=False)
+        except Exception:
+            pass
     if _EASY_READER is None:
         return []
     img, sx, sy = _downscale(image)
-    import io, numpy as np
+    import numpy as np
     arr = np.array(img)
     try:
         results = _EASY_READER.readtext(arr)
@@ -590,16 +716,97 @@ def _ensure_not_corner():
         pass
 
 
-async def screenshot() -> str:
-    """Capture screen + OCR. Returns all visible UI elements with positions."""
+# ── Region helpers ────────────────────────────────────────────────────
+
+_CHROME_REGION = "8,0,100,100"  # skip top 8% (browser chrome)
+
+
+def _parse_region(region_str: str, img_size: tuple) -> tuple:
+    """Parse region string into pixel bounds.
+    Format: 'top%,left%,bottom%,right%' e.g. '8,0,100,100'
+    Returns (x1, y1, x2, y2) in pixels.
+    """
+    if not region_str:
+        return (0, 0, img_size[0], img_size[1])
+    parts = region_str.replace(",", " ").split()
+    if len(parts) != 4:
+        return (0, 0, img_size[0], img_size[1])
+    w, h = img_size
+    t, l, b, r = (float(p) / 100 for p in parts)
+    return (int(w * l), int(h * t), int(w * r), int(h * b))
+
+
+def _filter_by_region(elements: list[dict], x1: int, y1: int, x2: int, y2: int) -> list[dict]:
+    """Filter elements to those whose center falls within the region."""
+    return [el for el in elements
+            if x1 <= el["center"][0] <= x2 and y1 <= el["center"][1] <= y2]
+
+
+# ── Snapshot with region support ──────────────────────────────────────
+
+
+def _snapshot(force: bool = False, region: str = "") -> tuple:
+    """Cached screenshot + OCR. Cache lasts 10s.
+    region: 'top%,left%,bottom%,right%' e.g. '8,0,100,100' skips top 8%.
+    """
+    with _SNAP_CACHE["lock"]:
+        now = _time.time()
+        if not force and _SNAP_CACHE["img"] is not None and now - _SNAP_CACHE["time"] < 10.0:
+            img = _SNAP_CACHE["img"]
+            elements = _SNAP_CACHE["elements"]
+        else:
+            from agent.desktop.config import DesktopConfig
+            from agent.desktop.vision import ScreenCapture
+            cap = ScreenCapture(DesktopConfig())
+            img = cap.capture()
+            elements = _fast_ocr(img)
+            _SNAP_CACHE["img"] = img
+            _SNAP_CACHE["elements"] = elements
+            _SNAP_CACHE["time"] = _time.time()
+
+    if region:
+        x1, y1, x2, y2 = _parse_region(region, img.size)
+        elements = _filter_by_region(elements, x1, y1, x2, y2)
+
+    return img, elements
+
+
+# ── Group text into content items ──────────────────────────────────────
+
+
+def _group_by_proximity(elements: list[dict], max_gap: int = 45) -> list[list[dict]]:
+    """Group OCR elements by vertical proximity. Each group is a content item."""
+    sorted_el = sorted(elements, key=lambda x: (x["center"][1], x["center"][0]))
+    groups = []
+    cur = []
+    last_y = -100
+    for el in sorted_el:
+        cy = el["center"][1]
+        if cur and cy - last_y > max_gap:
+            groups.append(cur)
+            cur = []
+        cur.append(el)
+        last_y = cy
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+# ── Tools ──────────────────────────────────────────────────────────────
+
+
+async def screenshot(region: str = "") -> str:
+    """Capture screen + OCR. Returns all visible UI elements with positions.
+    region: optional 'top%,left%,bottom%,right%' to filter (e.g. '8,0,100,100' skips browser chrome).
+    """
     from agent.desktop.app_control.windows import WindowManager
     from agent.desktop.config import DesktopConfig
     from agent.desktop.vision import ScreenCapture
-    img, elements = _snapshot(force=True)
+    img, elements = _snapshot(force=True, region=region)
     cap = ScreenCapture(DesktopConfig())
     path = cap.save()
     active = WindowManager.active()
-    lines = [f"Screen: {active}", f"Image: {path}"]
+    lines = [f"Screen: {active}", f"Screenshot: {path}"]
     if elements:
         for el in elements[:35]:
             lines.append(f"  '{el['text']}' at ({el['center'][0]},{el['center'][1]})")
@@ -608,22 +815,30 @@ async def screenshot() -> str:
     return "\n".join(lines)
 
 
-async def find_ui_element(text: str = "") -> str:
-    """Find a UI element by its text label. Returns coordinates."""
+async def find_ui_element(text: str = "", region: str = "", skip_chrome: bool = False) -> str:
+    """Find a UI element by its text label using OCR. Returns coordinates.
+    region: 'top%,left%,bottom%,right%' to limit search area.
+    skip_chrome: True to skip top 8% of screen (browser tabs/address bar).
+    """
     if not text:
         return "find_ui_element: provide text"
-    _, elements = _snapshot()
+    r = region or (_CHROME_REGION if skip_chrome else "")
+    _, elements = _snapshot(region=r)
     el = _find(elements, text)
     if el:
         return f"Found '{text}' at ({el['center'][0]},{el['center'][1]})"
     return f"'{text}' not visible. Try screenshot() first."
 
 
-async def click_text(text: str = "", button: str = "left") -> str:
-    """Find text on screen via OCR, move mouse, and click."""
+async def click_text(text: str = "", button: str = "left", region: str = "", skip_chrome: bool = False) -> str:
+    """Find text on screen via OCR, move mouse, and click.
+    region: 'top%,left%,bottom%,right%' to limit search area.
+    skip_chrome: True to skip top 8% of screen (browser tabs/address bar).
+    """
     if not text:
         return "click_text: provide text to click"
-    _, elements = _snapshot()
+    r = region or (_CHROME_REGION if skip_chrome else "")
+    _, elements = _snapshot(region=r)
     el = _find(elements, text)
     if not el:
         return f"'{text}' not visible. Use screenshot() to see available elements."
@@ -639,11 +854,15 @@ async def click_text(text: str = "", button: str = "left") -> str:
         return f"click_text error: {e}"
 
 
-async def double_click_text(text: str = "") -> str:
-    """Find text on screen via OCR and double-click."""
+async def double_click_text(text: str = "", region: str = "", skip_chrome: bool = False) -> str:
+    """Find text on screen via OCR and double-click.
+    region: 'top%,left%,bottom%,right%' to limit search area.
+    skip_chrome: True to skip top 8% of screen.
+    """
     if not text:
         return "double_click_text: provide text"
-    _, elements = _snapshot()
+    r = region or (_CHROME_REGION if skip_chrome else "")
+    _, elements = _snapshot(region=r)
     el = _find(elements, text)
     if not el:
         return f"'{text}' not visible."
@@ -659,11 +878,15 @@ async def double_click_text(text: str = "") -> str:
         return f"double_click_text error: {e}"
 
 
-async def right_click_text(text: str = "") -> str:
-    """Find text on screen via OCR and right-click."""
+async def right_click_text(text: str = "", region: str = "", skip_chrome: bool = False) -> str:
+    """Find text on screen via OCR and right-click.
+    region: 'top%,left%,bottom%,right%' to limit search area.
+    skip_chrome: True to skip top 8% of screen.
+    """
     if not text:
         return "right_click_text: provide text"
-    _, elements = _snapshot()
+    r = region or (_CHROME_REGION if skip_chrome else "")
+    _, elements = _snapshot(region=r)
     el = _find(elements, text)
     if not el:
         return f"'{text}' not visible."
@@ -733,6 +956,9 @@ async def hotkey(keys: str | list[str] = "") -> str:
         return "Fail-safe triggered."
 
 
+_FAILSAFE_HELP = "Fail-safe: mouse was at corner. Move it to the center of the screen and retry."
+
+
 async def scroll(amount: int = -3) -> str:
     """Scroll. Positive = up, negative = down."""
     try:
@@ -784,6 +1010,201 @@ async def open_app_gui(app: str = "") -> str:
         return _FAILSAFE_HELP
 
 
+async def write_code(code: str = "", filename: str = "", app: str = "vscode") -> str:
+    """Open editor, type code character-by-character (typewriter effect), then save.
+
+    Opens the editor via Windows search, creates a new untitled file, types
+    the code visibly character-by-character using pyautogui.typewrite(), then
+    saves with the given filename.
+
+    Args:
+        code: the full code/content to type (e.g. a complete Python script)
+        filename: save as this filename (e.g. 'snake.py', 'index.html'). Default: 'script.py'
+        app: editor — 'vscode' (default), 'notepad'
+    """
+    if not code:
+        return "write_code: provide code to write"
+    if not filename:
+        filename = "script.py"
+
+    lines = code.split("\n")
+
+    try:
+        if app in ("vscode", "code"):
+            pyautogui.hotkey("win")
+            await asyncio.sleep(0.4)
+            pyautogui.typewrite("vscode", interval=0.04)
+            await asyncio.sleep(1.5)
+            pyautogui.press("enter")
+            await asyncio.sleep(3.0)
+
+            pyautogui.hotkey("ctrl", "n")
+            await asyncio.sleep(1.0)
+            pyautogui.hotkey("ctrl", "1")
+            await asyncio.sleep(0.5)
+            pyautogui.typewrite(code, interval=0.01)
+            await asyncio.sleep(0.5)
+            pyautogui.hotkey("ctrl", "s")
+            await asyncio.sleep(0.5)
+            pyautogui.typewrite(filename, interval=0.04)
+            await asyncio.sleep(0.3)
+            pyautogui.press("enter")
+
+        elif app in ("notepad",):
+            pyautogui.hotkey("win")
+            await asyncio.sleep(0.4)
+            pyautogui.typewrite("notepad", interval=0.04)
+            await asyncio.sleep(1.5)
+            pyautogui.press("enter")
+            await asyncio.sleep(1.0)
+            pyautogui.typewrite(code, interval=0.01)
+            await asyncio.sleep(0.5)
+            pyautogui.hotkey("ctrl", "s")
+            await asyncio.sleep(0.5)
+            pyautogui.typewrite(filename, interval=0.04)
+            await asyncio.sleep(0.3)
+            pyautogui.press("enter")
+
+        return f"Typewritten {len(lines)} lines to '{filename}' in {app}."
+
+    except pyautogui.FailSafeException:
+        return _FAILSAFE_HELP
+    except Exception as e:
+        return f"write_code error: {e}"
+
+
+async def search_on_page(query: str = "", region: str = "8,0,100,100") -> str:
+    """Find a search bar on the current page, type a query, and submit.
+
+    Uses region filtering to avoid clicking browser chrome elements.
+    Works on any website (YouTube, Google, Amazon, Twitter, etc.).
+
+    Args:
+        query: text to search for
+        region: screen region to look for search bar ('top%,left%,bottom%,right%')
+                default '8,0,100,100' skips browser chrome (top 8%).
+    """
+    if not query:
+        return "search_on_page: provide a query"
+    try:
+        _, elements = _snapshot(region=region)
+
+        search_keywords = ["search", "find", "type here", "look up", "query"]
+        search_el = None
+        for el in elements:
+            if any(kw in el["text"].lower() for kw in search_keywords):
+                search_el = el
+                break
+
+        if search_el:
+            cx, cy = search_el["center"]
+            pyautogui.moveTo(cx, cy, duration=0.25)
+            pyautogui.click()
+            await asyncio.sleep(0.5)
+        else:
+            x1, y1, x2, y2 = _parse_region(region, (pyautogui.size().width, pyautogui.size().height))
+            fallback_x = (x1 + x2) // 2
+            fallback_y = y1 + int((y2 - y1) * 0.05)
+            pyautogui.moveTo(fallback_x, fallback_y, duration=0.25)
+            pyautogui.click()
+            await asyncio.sleep(0.5)
+
+        pyautogui.typewrite(query, interval=0.02)
+        await asyncio.sleep(0.3)
+        pyautogui.press("enter")
+        await asyncio.sleep(3)
+
+        img, result_elements = _snapshot(force=True, region=region)
+        lines = ["Search submitted. Screen now shows:"]
+        for el in result_elements[:30]:
+            lines.append(f"  '{el['text']}' at ({el['center'][0]},{el['center'][1]})")
+        return "\n".join(lines)
+    except pyautogui.FailSafeException:
+        return _FAILSAFE_HELP
+    except Exception as e:
+        return f"search_on_page error: {e}"
+
+
+async def list_content(region: str = "8,0,100,100", min_chars: int = 3, max_items: int = 20) -> str:
+    """Group visible text on screen into content items (search results, lists, cards).
+    Groups nearby text elements by proximity. Returns structured items with text and positions.
+    Use this after navigating to a page to understand its content structure.
+
+    Args:
+        region: screen region ('top%,left%,bottom%,right%'), default skips browser chrome
+        min_chars: minimum characters per text element to include
+        max_items: maximum number of items to return
+    """
+    img, elements = _snapshot(region=region)
+    if not elements:
+        return "(no text detected in region)"
+
+    groups = _group_by_proximity(elements)
+
+    items = []
+    for group in groups:
+        texts = [g["text"] for g in group if len(g["text"]) >= min_chars]
+        if not texts:
+            continue
+        combined = " | ".join(texts)
+        x1 = min(g["bbox"][0] for g in group)
+        y1 = min(g["bbox"][1] for g in group)
+        x2 = max(g["bbox"][2] for g in group)
+        y2 = max(g["bbox"][3] for g in group)
+        items.append({
+            "text": combined,
+            "center": [(x1 + x2) // 2, (y1 + y2) // 2],
+            "bbox": [x1, y1, x2, y2],
+        })
+
+    if not items:
+        return "(no content groups found)"
+
+    lines = [f"Found {len(items)} content items:"]
+    for i, item in enumerate(items[:max_items]):
+        lines.append(f"  [{i}] \"{item['text'][:150]}\" at ({item['center'][0]},{item['center'][1]})")
+    return "\n".join(lines)
+
+
+async def youtube_search(query: str = "", action: str = "play_first", title_keyword: str = "", result_index: int = 0) -> str:
+    """Search YouTube and play a video. High-level: handles navigation, search, result parsing.
+
+    Args:
+        query: What to search for (e.g. 'never gonna give you up')
+        action: 'play_first' (default) or 'play_by_title'
+        title_keyword: If action='play_by_title', play the first result whose title contains this
+        result_index: 0-based index to pick from results (default 0)
+    """
+    if not query:
+        return "youtube_search: provide a query"
+    try:
+        from agent.desktop.config import DesktopConfig
+        from agent.desktop.vision import ScreenCapture, OCR, UIDetector
+        from agent.desktop.automation import Mouse, Keyboard
+        from agent.desktop.browser import BrowserNav, BrowserSearch
+        from agent.desktop.workflows import YouTubeWorkflow
+
+        cfg = DesktopConfig()
+        mouse = Mouse(cfg)
+        keyboard = Keyboard(cfg)
+        capture = ScreenCapture(cfg)
+        ocr = OCR(cfg)
+        detector = UIDetector(cfg, capture, ocr)
+        nav = BrowserNav(cfg, mouse, keyboard, detector)
+        browser_search = BrowserSearch(cfg, mouse, keyboard, detector)
+
+        yt = YouTubeWorkflow(cfg, mouse, keyboard, detector, nav, browser_search)
+
+        if action == "play_by_title" and title_keyword:
+            result = yt.search_and_play(query, title_keyword=title_keyword)
+        else:
+            result = yt.search_and_play(query, result_index=result_index)
+
+        return result
+    except Exception as e:
+        return f"youtube_search error: {e}"
+
+
 TOOLS: dict[str, callable] = {
     "run_command": run_command,
     "open_app": open_app,
@@ -806,4 +1227,9 @@ TOOLS: dict[str, callable] = {
     "get_mouse_position": get_mouse_position,
     "navigate_to": navigate_to,
     "open_app_gui": open_app_gui,
+    "search_on_page": search_on_page,
+    "list_content": list_content,
+    "write_code": write_code,
+    "edit_file": edit_file,
+    "youtube_search": youtube_search,
 }

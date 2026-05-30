@@ -55,29 +55,46 @@ TOOL_SPECS: dict[str, dict] = {
     },
     "screenshot": {
         "desc": "CAPTURE SCREEN + OCR. Returns all visible text with coordinates. USE THIS FIRST to see what's on screen before clicking anything.",
-        "args": {},
+        "args": {"region": "optional filter: 'top%,left%,bottom%,right%' e.g. '8,0,100,100' skips browser chrome (top 8%)"},
         "note": "Always call this first! It returns UI element positions you can click.",
         "example": {"tool": "screenshot", "args": {}},
     },
     "find_ui_element": {
         "desc": "Find a UI element by its text label using OCR. Returns center coordinates.",
-        "args": {"text": "text label to find (e.g. 'Chrome', 'Search', 'Send')"},
-        "example": {"tool": "find_ui_element", "args": {"text": "Search"}},
+        "args": {
+            "text": "text label to find (e.g. 'Chrome', 'Search', 'Send')",
+            "region": "optional: 'top%,left%,bottom%,right%' to limit search area",
+            "skip_chrome": "True to skip top 8% of screen (browser chrome)",
+        },
+        "example": {"tool": "find_ui_element", "args": {"text": "Search", "skip_chrome": True}},
     },
     "click_text": {
         "desc": "Find text on screen via OCR, move mouse to it, and click. VISION-GUIDED: no coordinates needed.",
-        "args": {"text": "visible text to click (e.g. 'Chrome', 'Search', 'Messages')", "button": "left (default) or right"},
-        "note": "PREFER THIS over mouse_click for clicking UI elements. It finds the element visually.",
-        "example": {"tool": "click_text", "args": {"text": "Chrome"}},
+        "args": {
+            "text": "visible text to click (e.g. 'Chrome', 'Search', 'Messages')",
+            "button": "left (default) or right",
+            "region": "optional: 'top%,left%,bottom%,right%' to limit search area",
+            "skip_chrome": "True to skip top 8% of screen (browser chrome)",
+        },
+        "note": "Use skip_chrome=True when clicking page content (avoids clicking browser tabs/address bar).",
+        "example": {"tool": "click_text", "args": {"text": "Search", "skip_chrome": True}},
     },
     "double_click_text": {
         "desc": "Find text via OCR and double-click it.",
-        "args": {"text": "visible text to double-click"},
+        "args": {
+            "text": "visible text to double-click",
+            "region": "optional: 'top%,left%,bottom%,right%' to limit search area",
+            "skip_chrome": "True to skip top 8% of screen",
+        },
         "example": {"tool": "double_click_text", "args": {"text": "notepad.exe"}},
     },
     "right_click_text": {
         "desc": "Find text via OCR and right-click it.",
-        "args": {"text": "visible text to right-click"},
+        "args": {
+            "text": "visible text to right-click",
+            "region": "optional: 'top%,left%,bottom%,right%' to limit search area",
+            "skip_chrome": "True to skip top 8% of screen",
+        },
         "example": {"tool": "right_click_text", "args": {"text": "Desktop"}},
     },
     "mouse_click": {
@@ -128,6 +145,56 @@ TOOL_SPECS: dict[str, dict] = {
         "desc": "Open a desktop app via Win key search. Use instead of open_app for Windows GUI apps.",
         "args": {"app": "app name to search for (chrome, notepad, calculator, vs code, etc.)"},
         "example": {"tool": "open_app_gui", "args": {"app": "chrome"}},
+    },
+    "search_on_page": {
+        "desc": "Find a search bar on the current page, type a query, and submit. Uses region filtering to avoid browser chrome. Works on ANY website (YouTube, Google, Amazon, Twitter, etc.).",
+        "args": {
+            "query": "text to search for",
+            "region": "screen region to search, default '8,0,100,100' skips top 8% (browser chrome)",
+        },
+        "note": "PREFER THIS over manually clicking 'Search' + typing for searching on websites.",
+        "example": {"tool": "search_on_page", "args": {"query": "lofi hip hop"}},
+    },
+    "list_content": {
+        "desc": "Group visible text into content items by proximity. Parses search results, lists, cards, etc. into structured items you can inspect or click.",
+        "args": {
+            "region": "screen region, default '8,0,100,100' skips browser chrome",
+            "min_chars": "minimum chars per text fragment (default 3)",
+            "max_items": "max items to return (default 20)",
+        },
+        "note": "Use this after search_on_page or navigate_to to understand what's on the page.",
+        "example": {"tool": "list_content", "args": {}},
+    },
+    "write_code": {
+        "desc": "Open VSCode via Windows search, create new file, type code character-by-character (typewriter effect) so the user can see it being written, then save. CRITICAL: use this when user asks to 'write code', 'make a program', 'create a script', 'build a webpage'. Do NOT use write_file for code.",
+        "args": {
+            "code": "the full code/content to type character-by-character",
+            "filename": "save as this filename (e.g. 'snake.py', 'hello.py', 'index.html'). Default: 'script.py'",
+            "app": "editor: 'vscode' (default), 'notepad'",
+        },
+        "note": "CRITICAL — ALWAYS use this when user wants code shown. Opens editor, types visibly char-by-char, auto-saves. Do NOT silently write files with write_file.",
+        "example": {"tool": "write_code", "args": {"code": "import pygame\n...", "filename": "snake.py"}},
+    },
+    "edit_file": {
+        "desc": "Find and replace text in an existing file. Use for targeted bug fixes instead of rewriting the whole file.",
+        "args": {
+            "filepath": "path to the file to edit (e.g. 'snake.py')",
+            "old": "the exact text to find (must match exactly — include full line with indentation)",
+            "new": "the replacement text",
+        },
+        "note": "PREFER THIS over write_code() when the user reports a bug. Make a single-line fix instead of rewriting.",
+        "example": {"tool": "edit_file", "args": {"filepath": "snake.py", "old": "    score = 0", "new": "    score = 0\n    high_score = 0"}},
+    },
+    "youtube_search": {
+        "desc": "HIGH-LEVEL: Search YouTube and play a video in one call. Handles navigation, search bar finding, result parsing (titles/dates/channels), and clicking the video. Use this instead of manually doing navigate_to+click_text+type_text.",
+        "args": {
+            "query": "search query (e.g. 'never gonna give you up')",
+            "action": "'play_first' (default) or 'play_by_title'",
+            "title_keyword": "if action='play_by_title', pick first result whose title contains this keyword",
+            "result_index": "0-based index of result to play (default 0)",
+        },
+        "note": "PREFER THIS over manually navigating + clicking for YouTube tasks.",
+        "example": {"tool": "youtube_search", "args": {"query": "lofi hip hop mix", "action": "play_first"}},
     },
 }
 

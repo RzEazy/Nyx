@@ -31,10 +31,16 @@ Rules:
     5. Only fall back to mouse_click(x,y) if you have coordinates from screenshot()
 - PREFER click_text over mouse_click whenever possible — it finds UI elements visually.
 - To launch apps: screenshot() to see Start menu, then click_text("chrome") or use open_app_gui.
-- To type in search bars: screenshot() to find the field, then click_text("Search") to focus it, then type_text().
+- **Skip browser chrome**: When interacting with page content in a browser, use skip_chrome=True on click_text/find_ui_element — this ignores the top 8% of screen (tabs, address bar) and only searches the actual page.
+  Example: click_text(text="Search", skip_chrome=True)  — finds the page's search bar, not the browser's.
+- **search_on_page**: Use this for searching on ANY website. It finds the search bar, types your query, submits it, and shows results — all in one call. Works on YouTube, Google, Amazon, Twitter, etc.
+- **list_content**: After navigating to a page or searching, call list_content() to group visible text into structured items (search results, product listings, etc.). Each item has a name and clickable coordinates.
 - navigate_to: focuses browser URL bar (Ctrl+L) and types URL. Works after a browser is open.
 - After a tool result, either call another tool (same fence format) OR give a short final answer — never both in one message.
 - If a tool returns an error, fix the arguments and try again once before explaining to the user.
+- CRITICAL: When user asks you to "write code", "show me code", "make a program", "create a script", "build a webpage", "make a React app": YOU MUST USE write_code() for EVERY file. NEVER use write_file for code — write_code opens VSCode, creates a new file, and character-by-character types the code in front of the user (typewriter effect). write_file is for silently writing data/config files only. Write each source file one at a time with separate write_code() calls.
+- If user reports a bug or error in code you wrote: use edit_file() to make a targeted fix (find + replace the broken line). Do NOT rewrite the whole file with write_code() — that wastes time and resets the editor.
+- For YouTube: USE youtube_search() instead of manually doing navigate_to → click_text → type_text. It handles search bar detection, result parsing (titles, channels, upload dates), and playing the video in one call.
 - Be concise.
 """
 
