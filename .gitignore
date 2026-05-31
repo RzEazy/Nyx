@@ -32,3 +32,9 @@ system_app_paths.txt
 _speed_test.py
 src/
 tests/automate.py
+
+# C# / WinForms (not part of this project)
+TaskBrowser/
+*.cs
+*.csproj
+*.sln
