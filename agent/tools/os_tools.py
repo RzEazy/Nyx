@@ -803,7 +803,7 @@ async def screenshot(region: str = "") -> str:
     cap = ScreenCapture(DesktopConfig())
     path = cap.save()
     active = WindowManager.active()
-    lines = [f"Screen: {active}", f"Screenshot: {path}"]
+    lines = [f"Screen: {active}"]
     if elements:
         for el in elements[:35]:
             lines.append(f"  '{el['text']}' at ({el['center'][0]},{el['center'][1]})")
